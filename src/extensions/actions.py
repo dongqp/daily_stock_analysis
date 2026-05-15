@@ -42,13 +42,38 @@ def _coerce_float(value: Any, *, field_name: str, default: float) -> float:
     return coerced
 
 
-def _coerce_int(value: Any, *, field_name: str, default: int) -> int:
+def _coerce_non_negative_int(value: Any, *, field_name: str, default: int) -> int:
     if value is None:
         return default
-    try:
-        return int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must be an integer") from exc
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a non-negative integer")
+    if isinstance(value, int):
+        coerced = value
+    elif isinstance(value, float):
+        if not math.isfinite(value) or value != int(value):
+            raise ValueError(f"{field_name} must be a non-negative integer")
+        coerced = int(value)
+    elif isinstance(value, str):
+        if not value.strip():
+            raise ValueError(f"{field_name} must be a non-negative integer")
+        try:
+            coerced = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} must be a non-negative integer") from exc
+    else:
+        raise ValueError(f"{field_name} must be a non-negative integer")
+
+    if coerced < 0:
+        raise ValueError(f"{field_name} must be a non-negative integer")
+    return coerced
+
+
+def _coerce_context(data: Any) -> Dict[str, Any]:
+    if data is None:
+        return {}
+    if isinstance(data, Mapping):
+        return dict(data)
+    raise ValueError("context.context must be a mapping when provided")
 
 
 class ActionMode(str, Enum):
@@ -79,12 +104,12 @@ class ActionBudget:
             raise ValueError("budget.timeout_seconds must be >= 0")
         return cls(
             timeout_seconds=timeout_seconds,
-            max_llm_calls=_coerce_int(
+            max_llm_calls=_coerce_non_negative_int(
                 data.get("max_llm_calls"),
                 field_name="budget.max_llm_calls",
                 default=0,
             ),
-            max_items=_coerce_int(
+            max_items=_coerce_non_negative_int(
                 data.get("max_items"),
                 field_name="budget.max_items",
                 default=10,
@@ -128,12 +153,12 @@ class ActionContext:
             idempotency_key=data.get("idempotency_key"),
             dry_run=_coerce_bool(data.get("dry_run"), field_name="dry_run"),
             budget=ActionBudget.from_mapping(data.get("budget")),
-            context=dict(data.get("context") or {}),
+            context=_coerce_context(data.get("context")),
             requires_confirmation=_coerce_bool(
                 data.get("requires_confirmation"),
                 field_name="requires_confirmation",
             ),
-            call_depth=_coerce_int(data.get("call_depth"), field_name="call_depth", default=0),
+            call_depth=_coerce_non_negative_int(data.get("call_depth"), field_name="call_depth", default=0),
         )
 
     def to_dict(self) -> Dict[str, Any]:

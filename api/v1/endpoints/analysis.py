@@ -583,6 +583,11 @@ def get_task_list(
             error=t.error,
             original_query=t.original_query,
             selection_source=t.selection_source,
+            task_type=t.task_type,
+            action_id=t.action_id,
+            subject=t.subject,
+            run_id=t.run_id,
+            caller=t.caller,
         )
         for t in all_tasks
     ]
@@ -761,6 +766,11 @@ def get_analysis_status(task_id: str) -> TaskStatus:
             stock_name=task.stock_name,
             original_query=task.original_query,
             selection_source=task.selection_source,
+            task_type=getattr(task, "task_type", "analysis"),
+            action_id=getattr(task, "action_id", None),
+            subject=getattr(task, "subject", None),
+            run_id=getattr(task, "run_id", None),
+            caller=getattr(task, "caller", None),
         )
     
     # 2. 从数据库查询已完成的记录

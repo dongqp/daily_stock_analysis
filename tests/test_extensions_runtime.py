@@ -306,6 +306,37 @@ class ExtensionRuntimeTestCase(unittest.TestCase):
             self.assertEqual(result.error.message, "Action context is invalid.")
             self.assertEqual(result.error.details["exception_type"], "ValueError")
 
+    def test_invalid_context_rejects_invalid_budget_limit_values(self):
+        for budget in (
+            {"max_llm_calls": -1},
+            {"max_items": -1},
+            {"max_llm_calls": 0.5},
+            {"max_items": float("nan")},
+        ):
+            result = self._runtime().execute_action("test.echo", context={"budget": budget})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.error.code, "invalid_context")
+            self.assertEqual(result.error.message, "Action context is invalid.")
+            self.assertEqual(result.error.details["exception_type"], "ValueError")
+
+    def test_invalid_context_rejects_invalid_call_depth(self):
+        for call_depth in (-1, 1.5, float("nan"), float("inf")):
+            result = self._runtime().execute_action("test.echo", context={"call_depth": call_depth})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.error.code, "invalid_context")
+            self.assertEqual(result.error.message, "Action context is invalid.")
+
+    def test_invalid_context_rejects_non_mapping_nested_context(self):
+        for nested_context in ([], "invalid-context"):
+            result = self._runtime().execute_action("test.echo", context={"context": nested_context})
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.error.code, "invalid_context")
+            self.assertEqual(result.error.message, "Action context is invalid.")
+            self.assertEqual(result.error.details["exception_type"], "ValueError")
+
     def test_invalid_context_rejects_non_mapping_root_context(self):
         for context in ([], "invalid-context"):
             result = self._runtime().execute_action("test.echo", context=context)

@@ -244,6 +244,11 @@ class TaskStatus(BaseModel):
         None, 
         description="分析结果或插件 Action 结果（仅在 completed 时存在）"
     )
+    task_type: str = Field("analysis", description="任务类型，analysis 或 plugin")
+    action_id: Optional[str] = Field(None, description="插件 Action ID（plugin 任务特有）")
+    subject: Optional[str] = Field(None, description="插件任务追踪 subject（通常是标的代码）")
+    run_id: Optional[str] = Field(None, description="Action 运行 ID（plugin 任务特有）")
+    caller: Optional[str] = Field(None, description="任务来源调用方（web/agent/bot 等）")
     market_review_report: Optional[str] = Field(
         None,
         description="大盘复盘任务返回的报告文本（仅大盘复盘任务）",
@@ -265,6 +270,11 @@ class TaskStatus(BaseModel):
             "example": {
                 "task_id": "task_abc123",
                 "status": "completed",
+                "task_type": "plugin",
+                "action_id": "dsa.analyze_stock",
+                "subject": "600519",
+                "run_id": "run_ext_done",
+                "caller": "agent",
                 "progress": 100,
                 "result": None,
                 "market_review_report": None,
@@ -297,6 +307,11 @@ class TaskInfo(BaseModel):
         None,
         description="插件 Action 结果（仅插件任务 completed 时存在）",
     )
+    task_type: str = Field("analysis", description="任务类型，analysis 或 plugin")
+    action_id: Optional[str] = Field(None, description="插件 Action ID（plugin 任务特有）")
+    subject: Optional[str] = Field(None, description="插件任务追踪 subject（通常是标的代码）")
+    run_id: Optional[str] = Field(None, description="Action 运行 ID（plugin 任务特有）")
+    caller: Optional[str] = Field(None, description="任务来源调用方（web/agent/bot 等）")
     error: Optional[str] = Field(None, description="错误信息（仅在 failed 时存在）")
     original_query: Optional[str] = Field(None, description="用户原始输入")
     selection_source: Optional[str] = Field(
@@ -314,6 +329,11 @@ class TaskInfo(BaseModel):
                 "status": "processing",
                 "progress": 50,
                 "message": "正在分析中...",
+                "task_type": "analysis",
+                "action_id": None,
+                "subject": None,
+                "run_id": None,
+                "caller": "web",
                 "report_type": "detailed",
                 "created_at": "2026-02-05T10:30:00",
                 "started_at": "2026-02-05T10:30:01",

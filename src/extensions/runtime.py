@@ -323,6 +323,36 @@ class ExtensionRuntime:
                 "Action context budget timeout_seconds must be non-negative.",
                 timeout_seconds=budget_timeout,
             )
+        if (
+            not isinstance(context.budget.max_llm_calls, int)
+            or isinstance(context.budget.max_llm_calls, bool)
+            or context.budget.max_llm_calls < 0
+        ):
+            raise ActionRuntimeError(
+                "invalid_context",
+                "Action context budget.max_llm_calls must be a non-negative integer.",
+                max_llm_calls=context.budget.max_llm_calls,
+            )
+        if (
+            not isinstance(context.budget.max_items, int)
+            or isinstance(context.budget.max_items, bool)
+            or context.budget.max_items < 0
+        ):
+            raise ActionRuntimeError(
+                "invalid_context",
+                "Action context budget.max_items must be a non-negative integer.",
+                max_items=context.budget.max_items,
+            )
+        if (
+            not isinstance(context.call_depth, int)
+            or isinstance(context.call_depth, bool)
+            or context.call_depth < 0
+        ):
+            raise ActionRuntimeError(
+                "invalid_context",
+                "Action context call_depth must be a non-negative integer.",
+                call_depth=context.call_depth,
+            )
 
     @staticmethod
     def _timeout_seconds(action, context):

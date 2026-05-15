@@ -306,6 +306,9 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             task_type="plugin",
             report_type="plugin",
             action_id="dsa.analyze_stock",
+            subject="600519",
+            run_id="run_ext_done",
+            caller="agent",
         )
 
         with patch("api.v1.endpoints.analysis.get_task_queue", return_value=queue):
@@ -313,6 +316,11 @@ class AnalysisApiContractTestCase(unittest.TestCase):
 
         self.assertEqual(status.status, "completed")
         self.assertEqual(status.result, action_result)
+        self.assertEqual(status.task_type, "plugin")
+        self.assertEqual(status.action_id, "dsa.analyze_stock")
+        self.assertEqual(status.subject, "600519")
+        self.assertEqual(status.run_id, "run_ext_done")
+        self.assertEqual(status.caller, "agent")
 
     def test_get_task_list_returns_plugin_action_result(self) -> None:
         if get_task_list is None or analysis_endpoint_module is None:
@@ -344,6 +352,9 @@ class AnalysisApiContractTestCase(unittest.TestCase):
                 selection_source=None,
                 task_type="plugin",
                 action_id="dsa.analyze_stock",
+                subject="600519",
+                run_id="run_ext_done",
+                caller="agent",
             )
         ]
         queue.get_task_stats.return_value = {
@@ -358,6 +369,69 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             response = get_task_list(status=None, limit=20)
 
         self.assertEqual(response.tasks[0].result, action_result)
+        self.assertEqual(response.tasks[0].task_type, "plugin")
+        self.assertEqual(response.tasks[0].action_id, "dsa.analyze_stock")
+        self.assertEqual(response.tasks[0].subject, "600519")
+        self.assertEqual(response.tasks[0].run_id, "run_ext_done")
+        self.assertEqual(response.tasks[0].caller, "agent")
+
+    def test_get_task_list_and_status_expose_plugin_task_trace_metadata(self) -> None:
+        if get_task_list is None or get_analysis_status is None or analysis_endpoint_module is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        pending_plugin = SimpleNamespace(
+            task_id="plugin-task-pending",
+            stock_code="002594",
+            stock_name="Run DSA stock analysis pending",
+            status=analysis_endpoint_module.TaskStatusEnum.PENDING,
+            progress=10,
+            message="任务排队",
+            report_type="plugin",
+            created_at=datetime(2026, 1, 1, 10, 10, 0),
+            started_at=None,
+            completed_at=None,
+            result=None,
+            error=None,
+            original_query=None,
+            selection_source=None,
+            task_type="plugin",
+            action_id="dsa.analyze_stock",
+            subject="002594",
+            run_id="run_ext_pending",
+            caller="agent",
+        )
+
+        queue = MagicMock()
+        queue.list_all_tasks.return_value = [pending_plugin]
+        queue.get_task.return_value = pending_plugin
+        queue.get_task_stats.return_value = {
+            "total": 1,
+            "pending": 1,
+            "processing": 0,
+            "completed": 0,
+            "failed": 0,
+        }
+
+        with patch("api.v1.endpoints.analysis.get_task_queue", return_value=queue):
+            task_list = get_task_list(status="pending", limit=20)
+
+        self.assertEqual(task_list.tasks[0].task_type, "plugin")
+        self.assertEqual(task_list.tasks[0].action_id, "dsa.analyze_stock")
+        self.assertEqual(task_list.tasks[0].subject, "002594")
+        self.assertEqual(task_list.tasks[0].run_id, "run_ext_pending")
+        self.assertEqual(task_list.tasks[0].caller, "agent")
+        self.assertIsNone(task_list.tasks[0].result)
+
+        with patch("api.v1.endpoints.analysis.get_task_queue", return_value=queue):
+            task_status = get_analysis_status("plugin-task-pending")
+
+        self.assertEqual(task_status.status, "pending")
+        self.assertEqual(task_status.task_type, "plugin")
+        self.assertEqual(task_status.action_id, "dsa.analyze_stock")
+        self.assertEqual(task_status.subject, "002594")
+        self.assertEqual(task_status.run_id, "run_ext_pending")
+        self.assertEqual(task_status.caller, "agent")
+        self.assertIsNone(task_status.result)
 
     def test_run_market_review_background_raises_when_report_is_empty(self) -> None:
         if analysis_endpoint_module is None:
