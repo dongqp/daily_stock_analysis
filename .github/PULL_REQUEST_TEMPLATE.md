@@ -25,8 +25,8 @@ For English contributors: please fill in English. All fields marked (EN) accept 
 ## Issue Link
 
 必须填写以下之一 / Fill in one of:
-- `Fixes #<issue_number>`
-- `Refs #<issue_number>`
+- `Fixes #<issue_number>` / 非 umbrella issue 或修复问题直达
+- `Refs #<issue_number>` / umbrella issue / 多个子任务分解场景
 - 无 Issue 时说明原因与验收标准 / If no issue, explain the motivation and acceptance criteria
 
 ## Verification Commands And Results
