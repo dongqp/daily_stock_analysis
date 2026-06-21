@@ -139,7 +139,12 @@ from api.v1.schemas.common import HealthResponse
 from src.auth import is_auth_enabled
 from src.data.stock_index_loader import find_existing_stock_index_path
 from src.services.system_config_service import SystemConfigService
-from src.services.runtime_scheduler import CLI_SCHEDULER_OWNER_ENV, RuntimeSchedulerService
+from src.services.runtime_scheduler import (
+    CLI_SCHEDULER_OWNER_ENV,
+    RUNTIME_SCHEDULER_FORCE_ENABLED_ENV,
+    RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV,
+    RuntimeSchedulerService,
+)
 from src.services.stock_index_remote_service import (
     get_remote_stock_index_cache_path,
     refresh_remote_stock_index_cache,
@@ -190,10 +195,33 @@ async def app_lifespan(app: FastAPI):
         "yes",
         "on",
     }
+    runtime_force_enabled = os.getenv(RUNTIME_SCHEDULER_FORCE_ENABLED_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    runtime_run_immediately_override = os.getenv(RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV)
+    if runtime_run_immediately_override is None:
+        from src.config import get_config
+
+        runtime_run_immediately = bool(getattr(get_config(), "schedule_run_immediately", False))
+    else:
+        runtime_run_immediately = runtime_run_immediately_override.strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    os.environ.pop(RUNTIME_SCHEDULER_FORCE_ENABLED_ENV, None)
+    os.environ.pop(RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV, None)
     app.state.runtime_scheduler_service = RuntimeSchedulerService(
         owns_schedule=runtime_owns_schedule,
+        force_enabled=runtime_force_enabled,
     )
-    app.state.runtime_scheduler_service.reconcile_from_config()
+    app.state.runtime_scheduler_service.reconcile_from_config(
+        run_immediately=runtime_run_immediately,
+    )
     app.state.system_config_service = SystemConfigService(
         runtime_scheduler=app.state.runtime_scheduler_service,
     )

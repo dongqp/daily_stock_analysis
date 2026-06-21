@@ -14,7 +14,12 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from src.services.runtime_scheduler import CLI_SCHEDULER_OWNER_ENV, RuntimeSchedulerService
+from src.services.runtime_scheduler import (
+    CLI_SCHEDULER_OWNER_ENV,
+    RUNTIME_SCHEDULER_FORCE_ENABLED_ENV,
+    RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV,
+    RuntimeSchedulerService,
+)
 
 
 class _FakeJob:
@@ -146,18 +151,80 @@ class RuntimeSchedulerServiceTestCase(unittest.TestCase):
 
         self.assertEqual(calls, ["run"])
 
+    def test_initial_reconcile_can_run_immediately_once(self) -> None:
+        fake_schedule = _FakeScheduleModule()
+        config = SimpleNamespace(
+            schedule_enabled=True,
+            schedule_time="18:00",
+            schedule_times=["09:20"],
+        )
+        calls = []
+
+        def runner(config_arg, args, stock_codes):
+            calls.append("run")
+
+        service = RuntimeSchedulerService(
+            config_provider=lambda: config,
+            task_runner=runner,
+        )
+        service._reload_config = lambda: config
+
+        with patch.dict(sys.modules, {"schedule": fake_schedule}), patch(
+            "src.services.runtime_scheduler.threading.Thread",
+            _NoopThread,
+        ):
+            service.reconcile_from_config(run_immediately=True)
+            config.schedule_times = ["15:10"]
+            service.reconcile_from_config()
+
+        self.assertEqual(calls, ["run"])
+
+    def test_force_enabled_survives_time_reconcile_until_explicit_enabled_update(self) -> None:
+        fake_schedule = _FakeScheduleModule()
+        config = SimpleNamespace(
+            schedule_enabled=False,
+            schedule_time="18:00",
+            schedule_times=["09:20"],
+        )
+        service = RuntimeSchedulerService(
+            config_provider=lambda: config,
+            force_enabled=True,
+        )
+
+        with patch.dict(sys.modules, {"schedule": fake_schedule}), patch(
+            "src.services.runtime_scheduler.threading.Thread",
+            _NoopThread,
+        ):
+            service.reconcile_from_config()
+            self.assertTrue(service.status()["enabled"])
+
+            config.schedule_times = ["15:10"]
+            service.reconcile_from_config()
+            self.assertTrue(service.status()["enabled"])
+            self.assertEqual([job.at_time for job in fake_schedule.get_jobs()], ["15:10"])
+
+            service.reconcile_from_config(clear_enabled_override=True)
+            self.assertFalse(service.status()["enabled"])
+            self.assertEqual(fake_schedule.get_jobs(), [])
+
     def test_lifespan_disables_runtime_scheduler_when_cli_owns_schedule(self) -> None:
         from api.app import create_app
 
         events = []
 
         class FakeRuntimeSchedulerService:
-            def __init__(self, *, owns_schedule=True):
+            def __init__(self, *, owns_schedule=True, force_enabled=False):
                 self.owns_schedule = owns_schedule
-                events.append(("init", owns_schedule))
+                self.force_enabled = force_enabled
+                events.append(("init", owns_schedule, force_enabled))
 
-            def reconcile_from_config(self):
-                events.append(("reconcile", self.owns_schedule))
+            def reconcile_from_config(self, *, run_immediately=False, clear_enabled_override=False):
+                events.append((
+                    "reconcile",
+                    self.owns_schedule,
+                    run_immediately,
+                    clear_enabled_override,
+                ))
 
             def stop(self):
                 events.append(("stop", self.owns_schedule))
@@ -178,7 +245,93 @@ class RuntimeSchedulerServiceTestCase(unittest.TestCase):
             with TestClient(app):
                 pass
 
-        self.assertEqual(events, [("init", False), ("reconcile", False), ("stop", False)])
+        self.assertEqual(events, [
+            ("init", False, False),
+            ("reconcile", False, False, False),
+            ("stop", False),
+        ])
+
+    def test_lifespan_passes_runtime_scheduler_start_flags(self) -> None:
+        from api.app import create_app
+
+        events = []
+
+        class FakeRuntimeSchedulerService:
+            def __init__(self, *, owns_schedule=True, force_enabled=False):
+                events.append(("init", owns_schedule, force_enabled))
+
+            def reconcile_from_config(self, *, run_immediately=False, clear_enabled_override=False):
+                events.append(("reconcile", run_immediately, clear_enabled_override))
+
+            def stop(self):
+                events.append(("stop",))
+
+        class FakeSystemConfigService:
+            def __init__(self, runtime_scheduler=None):
+                self.runtime_scheduler = runtime_scheduler
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                RUNTIME_SCHEDULER_FORCE_ENABLED_ENV: "true",
+                RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV: "true",
+            },
+            clear=False,
+        ), patch("api.app.RuntimeSchedulerService", FakeRuntimeSchedulerService), patch(
+            "api.app.SystemConfigService",
+            FakeSystemConfigService,
+        ), patch("api.app._schedule_stock_index_background_refresh"):
+            app = create_app(static_dir=Path(temp_dir))
+            with TestClient(app):
+                pass
+
+        self.assertEqual(events, [
+            ("init", True, True),
+            ("reconcile", True, False),
+            ("stop",),
+        ])
+        self.assertIsNone(os.getenv(RUNTIME_SCHEDULER_FORCE_ENABLED_ENV))
+        self.assertIsNone(os.getenv(RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV))
+
+    def test_lifespan_uses_configured_run_immediately_without_override(self) -> None:
+        from api.app import create_app
+
+        events = []
+
+        class FakeRuntimeSchedulerService:
+            def __init__(self, *, owns_schedule=True, force_enabled=False):
+                events.append(("init", owns_schedule, force_enabled))
+
+            def reconcile_from_config(self, *, run_immediately=False, clear_enabled_override=False):
+                events.append(("reconcile", run_immediately, clear_enabled_override))
+
+            def stop(self):
+                events.append(("stop",))
+
+        class FakeSystemConfigService:
+            def __init__(self, runtime_scheduler=None):
+                self.runtime_scheduler = runtime_scheduler
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(os.environ, {}, clear=False), patch(
+            "src.config.get_config",
+            return_value=SimpleNamespace(schedule_run_immediately=True),
+        ), patch("api.app.RuntimeSchedulerService", FakeRuntimeSchedulerService), patch(
+            "api.app.SystemConfigService",
+            FakeSystemConfigService,
+        ), patch("api.app._schedule_stock_index_background_refresh"):
+            os.environ.pop(CLI_SCHEDULER_OWNER_ENV, None)
+            os.environ.pop(RUNTIME_SCHEDULER_FORCE_ENABLED_ENV, None)
+            os.environ.pop(RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV, None)
+
+            app = create_app(static_dir=Path(temp_dir))
+            with TestClient(app):
+                pass
+
+        self.assertEqual(events, [
+            ("init", True, False),
+            ("reconcile", True, False),
+            ("stop",),
+        ])
 
 
 if __name__ == "__main__":

@@ -1220,14 +1220,32 @@ def main() -> int:
 
     bot_clients_started = False
     if start_serve:
-        from src.services.runtime_scheduler import CLI_SCHEDULER_OWNER_ENV
+        from src.services.runtime_scheduler import (
+            CLI_SCHEDULER_OWNER_ENV,
+            RUNTIME_SCHEDULER_FORCE_ENABLED_ENV,
+            RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV,
+        )
 
         # The API runtime scheduler owns schedules once the Web/API service starts.
         # This keeps Web settings, status, and run-now actions attached to the real
         # scheduler instead of a separate CLI loop.
         os.environ.pop(CLI_SCHEDULER_OWNER_ENV, None)
+        runtime_schedule_requested = not args.serve_only and (
+            args.schedule or config.schedule_enabled
+        )
         if not args.serve_only and args.schedule:
-            config.schedule_enabled = True
+            os.environ[RUNTIME_SCHEDULER_FORCE_ENABLED_ENV] = "true"
+        else:
+            os.environ.pop(RUNTIME_SCHEDULER_FORCE_ENABLED_ENV, None)
+        if runtime_schedule_requested:
+            runtime_run_immediately = config.schedule_run_immediately
+            if getattr(args, 'no_run_immediately', False):
+                runtime_run_immediately = False
+            os.environ[RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV] = (
+                "true" if runtime_run_immediately else "false"
+            )
+        else:
+            os.environ.pop(RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV, None)
         if not prepare_webui_frontend_assets():
             logger.warning("前端静态资源未就绪，继续启动 FastAPI 服务（Web 页面可能不可用）")
         try:

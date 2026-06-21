@@ -451,14 +451,19 @@ class MainScheduleModeTestCase(unittest.TestCase):
         error_log.assert_called_once()
 
     def test_serve_with_enabled_schedule_uses_api_runtime_scheduler(self) -> None:
-        from src.services.runtime_scheduler import CLI_SCHEDULER_OWNER_ENV
+        from src.services.runtime_scheduler import (
+            CLI_SCHEDULER_OWNER_ENV,
+            RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV,
+        )
 
         args = self._make_args(serve=True, schedule=False, host="127.0.0.1", port=8000)
         config = self._make_config(webui_enabled=False, schedule_enabled=True)
         marker_seen_by_server = []
+        run_immediately_seen_by_server = []
 
         def fake_start_api_server(host, port, config):
             marker_seen_by_server.append(os.getenv(CLI_SCHEDULER_OWNER_ENV))
+            run_immediately_seen_by_server.append(os.getenv(RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV))
 
         with patch.dict(
             os.environ,
@@ -476,20 +481,27 @@ class MainScheduleModeTestCase(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(marker_seen_by_server, [None])
+        self.assertEqual(run_immediately_seen_by_server, ["true"])
         start_bots.assert_called_once_with(config)
         run_with_schedule.assert_not_called()
 
     def test_serve_schedule_flag_enables_api_runtime_scheduler(self) -> None:
-        from src.services.runtime_scheduler import CLI_SCHEDULER_OWNER_ENV
+        from src.services.runtime_scheduler import (
+            CLI_SCHEDULER_OWNER_ENV,
+            RUNTIME_SCHEDULER_FORCE_ENABLED_ENV,
+            RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV,
+        )
 
         args = self._make_args(serve=True, schedule=True, host="127.0.0.1", port=8000)
         config = self._make_config(webui_enabled=False, schedule_enabled=False)
         marker_seen_by_server = []
-        schedule_enabled_seen_by_server = []
+        force_enabled_seen_by_server = []
+        run_immediately_seen_by_server = []
 
         def fake_start_api_server(host, port, config):
             marker_seen_by_server.append(os.getenv(CLI_SCHEDULER_OWNER_ENV))
-            schedule_enabled_seen_by_server.append(config.schedule_enabled)
+            force_enabled_seen_by_server.append(os.getenv(RUNTIME_SCHEDULER_FORCE_ENABLED_ENV))
+            run_immediately_seen_by_server.append(os.getenv(RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV))
 
         with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}, clear=False), \
              patch("main.parse_arguments", return_value=args), \
@@ -503,7 +515,39 @@ class MainScheduleModeTestCase(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(marker_seen_by_server, [None])
-        self.assertEqual(schedule_enabled_seen_by_server, [True])
+        self.assertEqual(force_enabled_seen_by_server, ["true"])
+        self.assertEqual(run_immediately_seen_by_server, ["true"])
+        self.assertFalse(config.schedule_enabled)
+        run_with_schedule.assert_not_called()
+
+    def test_serve_schedule_flag_passes_no_run_immediately_to_runtime_scheduler(self) -> None:
+        from src.services.runtime_scheduler import RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV
+
+        args = self._make_args(
+            serve=True,
+            schedule=True,
+            no_run_immediately=True,
+            host="127.0.0.1",
+            port=8000,
+        )
+        config = self._make_config(webui_enabled=False, schedule_enabled=False)
+        run_immediately_seen_by_server = []
+
+        def fake_start_api_server(host, port, config):
+            run_immediately_seen_by_server.append(os.getenv(RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV))
+
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}, clear=False), \
+             patch("main.parse_arguments", return_value=args), \
+             patch("main.get_config", return_value=config), \
+             patch("main.prepare_webui_frontend_assets", return_value=True), \
+             patch("main.start_api_server", side_effect=fake_start_api_server), \
+             patch("main.start_bot_stream_clients"), \
+             patch("main.time.sleep", side_effect=KeyboardInterrupt), \
+             patch("src.scheduler.run_with_schedule") as run_with_schedule:
+            exit_code = main.main()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(run_immediately_seen_by_server, ["false"])
         run_with_schedule.assert_not_called()
 
     def test_reload_runtime_config_preserves_process_env_overrides(self) -> None:

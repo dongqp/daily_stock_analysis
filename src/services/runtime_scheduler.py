@@ -15,6 +15,8 @@ from src.scheduler import Scheduler, normalize_schedule_times
 
 logger = logging.getLogger(__name__)
 CLI_SCHEDULER_OWNER_ENV = "DSA_CLI_SCHEDULER_OWNS_SCHEDULE"
+RUNTIME_SCHEDULER_FORCE_ENABLED_ENV = "DSA_RUNTIME_SCHEDULER_FORCE_ENABLED"
+RUNTIME_SCHEDULER_RUN_IMMEDIATELY_ENV = "DSA_RUNTIME_SCHEDULER_RUN_IMMEDIATELY"
 
 
 class RuntimeSchedulerService:
@@ -26,6 +28,7 @@ class RuntimeSchedulerService:
         config_provider: Callable[[], Config] = get_config,
         task_runner: Optional[Callable[[Config, Any, Optional[List[str]]], Any]] = None,
         owns_schedule: Optional[bool] = None,
+        force_enabled: bool = False,
     ) -> None:
         self._config_provider = config_provider
         self._task_runner = task_runner
@@ -37,6 +40,7 @@ class RuntimeSchedulerService:
                 "on",
             }
         self._owns_schedule = owns_schedule
+        self._force_enabled = force_enabled
         self._lock = threading.RLock()
         self._run_lock = threading.Lock()
         self._scheduler: Optional[Scheduler] = None
@@ -104,13 +108,16 @@ class RuntimeSchedulerService:
             fallback_time=getattr(config, "schedule_time", "18:00"),
         )
 
-    def start(self) -> None:
+    def _is_schedule_enabled(self, config: Config) -> bool:
+        return self._force_enabled or bool(getattr(config, "schedule_enabled", False))
+
+    def start(self, *, run_immediately: bool = False) -> None:
         with self._lock:
             if not self._owns_schedule:
                 self.stop()
                 return
             config = self._config_provider()
-            if not getattr(config, "schedule_enabled", False):
+            if not self._is_schedule_enabled(config):
                 self.stop()
                 return
             self.stop()
@@ -124,7 +131,7 @@ class RuntimeSchedulerService:
                 schedule_times_provider=self._current_times,
                 register_signals=False,
             )
-            scheduler.set_daily_task(self._run_analysis_once, run_immediately=False)
+            scheduler.set_daily_task(self._run_analysis_once, run_immediately=run_immediately)
             thread = threading.Thread(
                 target=scheduler.run,
                 daemon=True,
@@ -143,13 +150,20 @@ class RuntimeSchedulerService:
         self._thread = None
         self._enabled = False
 
-    def reconcile_from_config(self) -> None:
+    def reconcile_from_config(
+        self,
+        *,
+        run_immediately: bool = False,
+        clear_enabled_override: bool = False,
+    ) -> None:
+        if clear_enabled_override:
+            self._force_enabled = False
         if not self._owns_schedule:
             self.stop()
             return
         config = self._config_provider()
-        if getattr(config, "schedule_enabled", False):
-            self.start()
+        if self._is_schedule_enabled(config):
+            self.start(run_immediately=run_immediately)
         else:
             self.stop()
 

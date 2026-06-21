@@ -1217,6 +1217,74 @@ describe('SettingsPage', () => {
     expect(screen.getByTestId('scheduler-last-error')).toHaveTextContent('analysis failed');
   });
 
+  it('shows active runtime scheduler state even when saved schedule flag is false', async () => {
+    const configState = buildSystemConfigState();
+    getSchedulerStatus.mockResolvedValueOnce({
+      enabled: true,
+      running: false,
+      scheduleTimes: ['18:00'],
+      nextRunAt: null,
+      lastRunAt: null,
+      lastSuccessAt: null,
+      lastError: null,
+    });
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      activeCategory: 'system',
+      itemsByCategory: {
+        ...configState.itemsByCategory,
+        system: [
+          ...configState.itemsByCategory.system,
+          {
+            key: 'SCHEDULE_ENABLED',
+            value: 'false',
+            rawValueExists: true,
+            isMasked: false,
+            schema: {
+              key: 'SCHEDULE_ENABLED',
+              category: 'system',
+              dataType: 'boolean',
+              uiControl: 'switch',
+              isSensitive: false,
+              isRequired: false,
+              isEditable: true,
+              options: [],
+              validation: {},
+              displayOrder: 8,
+            },
+          },
+          {
+            key: 'SCHEDULE_TIMES',
+            value: '18:00',
+            rawValueExists: true,
+            isMasked: false,
+            schema: {
+              key: 'SCHEDULE_TIMES',
+              category: 'system',
+              dataType: 'string',
+              uiControl: 'text',
+              isSensitive: false,
+              isRequired: false,
+              isEditable: true,
+              options: [],
+              validation: {},
+              displayOrder: 11,
+            },
+          },
+        ],
+      },
+    }));
+
+    render(<SettingsPage />);
+
+    const enabledCheckbox = await screen.findByTestId('scheduler-enabled-checkbox');
+    expect(enabledCheckbox).toBeChecked();
+
+    fireEvent.click(enabledCheckbox);
+
+    expect(setDraftValue).toHaveBeenCalledWith('SCHEDULE_ENABLED', 'false');
+    await waitFor(() => expect(enabledCheckbox).not.toBeChecked());
+  });
+
   it('refreshes scheduler status after saving scheduler settings', async () => {
     const configState = buildSystemConfigState();
     getSchedulerStatus

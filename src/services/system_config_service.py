@@ -1468,7 +1468,9 @@ class SystemConfigService:
             "SCHEDULE_TIMES",
         }:
             try:
-                self._runtime_scheduler.reconcile_from_config()
+                self._runtime_scheduler.reconcile_from_config(
+                    clear_enabled_override="SCHEDULE_ENABLED" in submitted_keys,
+                )
             except Exception as exc:  # pragma: no cover - defensive branch
                 logger.error("Runtime scheduler reconcile failed: %s", exc, exc_info=True)
                 warnings.append("Configuration updated but runtime scheduler reconcile failed")

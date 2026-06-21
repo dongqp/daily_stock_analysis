@@ -293,6 +293,7 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
   const [statusError, setStatusError] = useState<ParsedApiError | null>(null);
   const [runNowError, setRunNowError] = useState<ParsedApiError | null>(null);
   const [runNowSuccess, setRunNowSuccess] = useState('');
+  const [scheduleEnabledOverride, setScheduleEnabledOverride] = useState<boolean | null>(null);
 
   const refreshSchedulerStatus = useCallback(async () => {
     setStatusError(null);
@@ -314,6 +315,10 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
     void refreshSchedulerStatus();
   }, [hasSchedulerSettings, refreshSchedulerStatus, statusRefreshToken]);
 
+  useEffect(() => {
+    setScheduleEnabledOverride(null);
+  }, [scheduleEnabledItem?.value, statusRefreshToken]);
+
   if (!hasSchedulerSettings) {
     return null;
   }
@@ -325,6 +330,7 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
   );
   const timeTargetKey = scheduleTimesItem ? 'SCHEDULE_TIMES' : 'SCHEDULE_TIME';
   const statusEnabled = status?.enabled ?? scheduleEnabled;
+  const displayedScheduleEnabled = scheduleEnabledOverride ?? statusEnabled;
   const effectiveStatusTimes = status?.scheduleTimes?.length ? status.scheduleTimes : scheduleTimes.filter(Boolean);
   const validationIssues = [
     ...(issueByKey.SCHEDULE_ENABLED || []),
@@ -367,9 +373,13 @@ const SchedulerSettingsCard: React.FC<SchedulerSettingsCardProps> = ({
               <input
                 type="checkbox"
                 className="mt-1 h-4 w-4 rounded border-border text-cyan focus:ring-cyan/20"
-                checked={scheduleEnabled}
+                checked={displayedScheduleEnabled}
+                data-testid="scheduler-enabled-checkbox"
                 disabled={disabled || !scheduleEnabledItem?.schema?.isEditable}
-                onChange={(event) => onChange('SCHEDULE_ENABLED', event.target.checked ? 'true' : 'false')}
+                onChange={(event) => {
+                  setScheduleEnabledOverride(event.target.checked);
+                  onChange('SCHEDULE_ENABLED', event.target.checked ? 'true' : 'false');
+                }}
               />
               <span>
                 <span className="block text-sm font-semibold text-foreground">{t('settings.schedulerEnable')}</span>
