@@ -222,6 +222,8 @@ class StockAnalysisPipeline:
         self.notifier = NotificationService(source_message=source_message)
         self._single_stock_notify_lock = threading.Lock()
         self._daily_market_context_service_lock = threading.Lock()
+        self._concept_rankings_cache_lock = threading.Lock()
+        self._concept_rankings_cache: Dict[str, Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]] = {}
         
         # 初始化搜索服务（可选，初始化失败不应阻断主分析流程）
         try:
@@ -1117,20 +1119,7 @@ class StockAnalysisPipeline:
         if market != "cn" or isinstance(enriched_context.get("concept_boards"), dict):
             return
 
-        top_concepts: List[Dict[str, Any]] = []
-        bottom_concepts: List[Dict[str, Any]] = []
-        try:
-            fetch_rankings = getattr(self.fetcher_manager, "get_concept_rankings", None)
-            if callable(fetch_rankings):
-                rankings = fetch_rankings(5)
-                if isinstance(rankings, tuple) and len(rankings) == 2:
-                    raw_top, raw_bottom = rankings
-                    if isinstance(raw_top, list):
-                        top_concepts = raw_top
-                    if isinstance(raw_bottom, list):
-                        bottom_concepts = raw_bottom
-        except Exception as e:
-            logger.debug("%s attach concept_rankings failed (fail-open): %s", code, e)
+        top_concepts, bottom_concepts = self._get_concept_rankings_for_market(market)
 
         if top_concepts or bottom_concepts:
             enriched_context["concept_boards"] = {
@@ -1140,6 +1129,47 @@ class StockAnalysisPipeline:
                     "bottom": bottom_concepts,
                 },
             }
+
+    def _get_concept_rankings_for_market(
+        self,
+        market: str,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Fetch market-wide concept rankings once per pipeline run."""
+        if market != "cn":
+            return [], []
+
+        cache = getattr(self, "_concept_rankings_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self._concept_rankings_cache = cache
+
+        lock = getattr(self, "_concept_rankings_cache_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._concept_rankings_cache_lock = lock
+
+        with lock:
+            if market in cache:
+                top_concepts, bottom_concepts = cache[market]
+                return list(top_concepts), list(bottom_concepts)
+
+            top_concepts: List[Dict[str, Any]] = []
+            bottom_concepts: List[Dict[str, Any]] = []
+            try:
+                fetch_rankings = getattr(self.fetcher_manager, "get_concept_rankings", None)
+                if callable(fetch_rankings):
+                    rankings = fetch_rankings(5)
+                    if isinstance(rankings, tuple) and len(rankings) == 2:
+                        raw_top, raw_bottom = rankings
+                        if isinstance(raw_top, list):
+                            top_concepts = list(raw_top)
+                        if isinstance(raw_bottom, list):
+                            bottom_concepts = list(raw_bottom)
+            except Exception as e:
+                logger.debug("attach concept_rankings failed (fail-open): %s", e)
+
+            cache[market] = (top_concepts, bottom_concepts)
+            return list(top_concepts), list(bottom_concepts)
 
     def _ensure_agent_history(self, code: str, min_days: int = 240) -> None:
         """Ensure at least *min_days* of K-line history is in DB for agent tools."""
@@ -1501,13 +1531,13 @@ class StockAnalysisPipeline:
         }
 
     def _get_analysis_context_with_market_fallback(self, code: str) -> Optional[Dict[str, Any]]:
-        """Load analysis context, fetching JP/KR daily bars when DB has no context."""
+        """Load analysis context, fetching JP/KR/TW daily bars when DB has no context."""
         context = self.db.get_analysis_context(code)
         if isinstance(context, dict) and context:
             return context
 
         market = get_market_for_stock(normalize_stock_code(code))
-        if market not in {"jp", "kr"}:
+        if market not in {"jp", "kr", "tw"}:
             return context
 
         try:

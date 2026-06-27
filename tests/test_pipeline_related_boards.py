@@ -49,6 +49,32 @@ class PipelineRelatedBoardsTestCase(unittest.TestCase):
         self.assertEqual(enriched["concept_boards"]["data"]["top"][0]["name"], "机器人概念")
         self.assertEqual(enriched["concept_boards"]["data"]["bottom"][0]["change_pct"], -2.05)
 
+    def test_attach_belong_boards_reuses_concept_rankings_per_pipeline_run(self) -> None:
+        pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+        pipeline.fetcher_manager = MagicMock()
+        pipeline.fetcher_manager.get_belong_boards.side_effect = [
+            [{"name": "Robot Theme", "type": "concept"}],
+            [{"name": "AI Theme", "type": "concept"}],
+        ]
+        pipeline.fetcher_manager.get_concept_rankings.return_value = (
+            [{"name": "Robot Theme", "change_pct": 4.2}],
+            [{"name": "Chip Theme", "change_pct": -2.05}],
+        )
+
+        context = {
+            "market": "cn",
+            "status": "ok",
+            "coverage": {"boards": "ok"},
+            "boards": {"status": "ok", "data": {"top": [], "bottom": []}},
+        }
+
+        first = pipeline._attach_belong_boards_to_fundamental_context("600519", context)
+        second = pipeline._attach_belong_boards_to_fundamental_context("000001", context)
+
+        pipeline.fetcher_manager.get_concept_rankings.assert_called_once_with(5)
+        self.assertEqual(first["concept_boards"]["data"]["top"][0]["name"], "Robot Theme")
+        self.assertEqual(second["concept_boards"]["data"]["top"][0]["name"], "Robot Theme")
+
     def test_extract_board_details_exposes_concept_rankings(self) -> None:
         snapshot = {
             "fundamental_context": {
